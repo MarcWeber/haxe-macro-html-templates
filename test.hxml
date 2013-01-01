@@ -1,0 +1,5 @@
+-neko Test.n
+-main Test
+-cp lib
+-cp ../haxe-mw-extensions/lib
+-cp ../Parsex/src

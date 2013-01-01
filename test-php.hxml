@@ -1,0 +1,7 @@
+-cp lib
+-cp ../haxe-mw-extensions/lib
+-cp ../Parsex/src
+-main Test
+--php-front index.php
+--remap neko:php
+-php php
