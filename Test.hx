@@ -26,7 +26,7 @@ typedef E =
 enum Attribute {
   attr_expr(e:E); // must recturn hash or {} object
   attr_name_value(name:String, value:String);
-  attr_name_expr_as_value(name:String, expr:String);
+  attr_name_expr_as_value(name:String, expr:E);
 }
 
 enum ParsedTemplateItem {
@@ -56,6 +56,31 @@ typedef ParserState = {
   s:String,
   i:Int
 };
+
+#if macro
+class ExprBuilder {
+  public var items:Array<Expr>;
+  public function new() {
+    items = [];
+  }
+
+  public function s(s:String) {
+    var e:Expr;
+    if (items.length > 0){
+      var last_s = ReflectionExtensions.value_at_path(ArrayExtensions.last(items).expr, ["EConst",0,"CString",0]);
+      if (last_s != null){
+        items[items.length-1] = macro $(last_s + s);
+        return;
+      }
+    }
+    items.push(macro $(s));
+  }
+
+  public function expr(e:Expr) {
+    items.push(e);
+  }
+}
+#end
 
 // TODO: think about where to use return LazyMacro.lazy({
 class TemplateParser {
@@ -128,15 +153,56 @@ class TemplateParser {
   }
 
   static public function parse_attr_value(ps) {
-    expect_char(ps, "\""); ps.i++;
+    var c = code(ps);
+    if (c == 34 /*"*/ || c == 39 /* ' */)
+      ps.i++;
+    else
+      parse_failure(ps, "attr value expected quoted by ' or \"");
     var start = ps.i;
-    while (!eof(ps) && !is_char(ps, "\"")) ps.i++;
-    return ps.s.substr(start, ps.i - start);
+    while (!eof(ps) && !is_char(ps, "\"") && !is_char(ps, "'")) ps.i++;
+    ps.i++;
+    return ps.s.substr(start, ps.i - start -1);
   }
 
   static public function parse_tag(ii:Int, ps:ParserState):ParsedTemplateItem {
     var name = 'div';
     var attributes = [];
+
+    var add_attr = function(name, value){
+      // add to existing class entry:
+      var attr_added = false;
+      for(i in 0...attributes.length){
+        switch(attributes[i]) {
+          case attr_name_value(n_, c_):
+             if (n_ == name){
+               if (name == "class"){
+                 attributes[i] = attr_name_value(name, c_+" "+value);
+                 attr_added = true;
+               } else {
+                  parse_failure(ps, "duplicate attr definition "+name);
+               }
+             }
+             break;
+          case _:
+        }
+      }
+      if (!attr_added) attributes.push(attr_name_value(name, value));
+    };
+
+    var add_id = function(name){
+      // add to existing class entry:
+      var attr_added = false;
+      for(i in 0...attributes.length){
+        switch(attributes[i]) {
+          case attr_name_value("class", c_):
+             attributes[i] = attr_name_value("class", c_+" "+name);
+             attr_added = true;
+             break;
+          case _:
+        }
+      }
+    };
+
     // name:String, attributes:Array<Attribute>, contents:TemplateContent
     switch (code(ps)) {
       // tag name after %
@@ -146,21 +212,26 @@ class TemplateParser {
       case _:
     }
 
-    switch (code(ps)) {
-      case 46 /*.*/:
-        ps.i++;
-        attributes.push(attr_name_value("class", parse_name_like(ps)));
-      case 35 /*#*/:
-        ps.i++;
-        attributes.push(attr_name_value("id", parse_name_like(ps)));
-      case _:
+    while (!eof(ps)){
+      switch (code(ps)) {
+        case 46 /*.*/:
+          ps.i++;
+          var name = parse_name_like(ps);
+          add_attr("class", name);
+        case 35 /*#*/:
+          ps.i++;
+          var name = parse_name_like(ps);
+          add_attr("id", name);
+        case _:
+          break;
+      }
     }
     // parse attributes
     if (is_char(ps, "(")){
         ps.i++;
         ignore_spaces(ps);
         while (!eof(ps) && !is_char(ps, ")")){
-          // parse attribtes
+          // parse attributes
           ignore_spaces(ps);
           if (is_char(ps, "$")){
             // injections
@@ -172,9 +243,9 @@ class TemplateParser {
             expect_char(ps, "="); ps.i++;
             if (is_char(ps, "$")){
               ps.i++;
-              attributes.push(attr_name_value(name, parse_attr_value(ps)));
+              attributes.push(attr_name_expr_as_value(name, parse_haxe_expr(ps)));
             } else {
-              attributes.push(attr_name_expr_as_value(name, parse_attr_value(ps)));
+              add_attr(name, parse_attr_value(ps));
             }
           }
 
@@ -204,7 +275,7 @@ class TemplateParser {
         parse_template_items(ii + 2, ps, contents);
       }
     }
-    if (autoclose.contains(name) && contents != [])
+    if (ArrayExtensions.contains(autoclose,name) && contents != [])
       parse_failure(ps, "tag with children found which is not expected to have childs");
     return tag(name, attributes, contents);
   }
@@ -225,6 +296,15 @@ class TemplateParser {
       case 123 /* { */:
         ps.i++; walk_haxe_expr(ps);
         expect_char(ps, "}");
+      case _:
+        // anything else such as foo.bar
+        while (!eof(ps)){
+          var c = code(ps);
+          if ((c >= 97 && c <= 122) || c == 95 || c == 46)
+            // a-z _ .
+            ps.i++;
+          else break;
+        }
     }
     
   }
@@ -369,45 +449,61 @@ class TemplateParser {
   // later more complicated types such as string builders could be supported,
   // too. In the past I did some benchmarks - concatenating strings is that
   // optimized that it may not pay off using builders
-  static function template_content_to_expr(ptis:Array<ParsedTemplateItem>, e:
+  static public function template_content_to_expr(ptis:Array<ParsedTemplateItem>, e:
       {
         // html: String -> Expr,
         joinItems: Array<Expr> -> Expr, // this may try to optimize adjecent CString exprs
-        quote: Expr -> Expr // Expr evaluates to str, should return something quoting it
+        quoteS: String -> String, // quote string for HTML
+        quote: Expr -> Expr, // Expr evaluates to str, should return something quoting it
+        attrs: Expr -> Expr, // expr is {} or hash, should return expr evaluating to html
+        if_: Expr -> Expr -> Expr -> Expr,
+        for_: Expr -> Expr -> Expr
       }
   ):Expr {
-    var r = [];
+    var r = new ExprBuilder();
     for(pti in ptis){
       switch(pti) {
         case text(s):
-          r.push(macro $(s));
+          r.s(s);
         case expr(expr, quoted): 
           var e_ = expr;
           if (quoted) e_ = e.quote(e_);
-          r.push(e_);
-        case tag(name, _/* attributes, */, contents):
+          r.expr(e_);
+        case tag(name, attributes, contents):
           // tag open
-          r.push(macro "<"+name+" ");
-          // attributes
+          r.s("<"+name);
 
-          var l = [];
+          // attributes TODO
+          for (a in attributes){
+            r.s(" ");
+            switch(a) {
+              case attr_expr(e): r.expr(e);
+              case attr_name_value(name, value):
+                r.s(name+"=\""+e.quoteS(value)+"\"");
+              case attr_name_expr_as_value(name, expr):
+                r.s(name+"=\"");
+                r.expr(e.quote(expr));
+                r.s("\"");
+            }
+          }
+
           if (ArrayExtensions.contains(autoclose, name)){
             if (contents.length > 0)
+              // internal error, should have been caught in parse_tag
               throw "bad, autoclosing tag but contents found!";
-            l.push(macro "/>");
+            r.s("/>");
           } else {
-            l.push(macro ">");
-            // TODO
-            // add contents
-            // l.concat(template_content_to_expr(
-            l.push(macro "</"+name+">");
+            r.s(">");
+            r.expr(template_content_to_expr(contents, e));
+            r.s("</"+name+">");
           }
         case control_if(cond, then_, else_):
-        case control_for(for_, content):
+          r.expr(e.if_(cond, template_content_to_expr(then_, e), else_ == null ? null : template_content_to_expr(else_, e)));
+        case control_for(for_, content ):
+          r.expr(e.for_(for_, template_content_to_expr(content,e) ));
       }
-      r.push(expr);
     }
-    return e.joinItems(r);
+    return e.joinItems(r.items);
   }
 #end
 
@@ -423,9 +519,35 @@ class TemplateParser {
   }
 
 
+#if macro
   public static function template_to_str_expr(s:String):Expr {
-    return template_content_to_expr(parse_template(s));
+    return template_content_to_expr(parse_template(s), {
+        joinItems: function(items){
+                    return switch(items.length) {
+                      case 0: macro $("");
+                      case 1: items[0];
+                      case _:
+                        var c = items.shift();
+                        while (items.length > 0){
+                          var next = items.shift();
+                          c = macro $c + $next;
+                        }
+                        c;
+                    }
+                  },
+        quoteS: function(s){ return StringTools.htmlEscape(s); },
+        quote: function(e){ return macro StringTools.htmlEscape($e); },
+        attrs: function(e){ return macro HTMLTemplate.attrsToHtml($e); },
+                  if_: function(cond, if_, else_){
+                    var el = else_ == null ? (macro "") : else_;
+                    return macro ($cond ? $if_ : $el);
+                },
+        for_: null
+	// EFor( it : Expr, expr : Expr );
+    });
   }
+#end
+
 }
 
 /*
@@ -433,8 +555,23 @@ class TemplateParser {
 */
 class HTMLTemplate {
 
+#if !macro
+  static public function attrsToHtml(a:Dynamic) {
+    var s = "";
+    if (Std.is(a, Hash)){
+      var h: Hash<String> = cast(a);
+      for(k in h.keys())
+        s+=" "+k+"=\""+ StringTools.htmlEscape(h.get(k))+"\"";
+    } else {
+      for (k in Reflect.fields(a))
+        s+=" "+k+"=\""+ StringTools.htmlEscape(Reflect.field(a,k))+"\"";
+    }
+    return s;
+  }
+#end
+
   @:macro static public function haml_like_str(template:Expr): Expr {
-    return TemplateParser.template_to_str_expr(ReflectionExtensions.value_at_path(template.expr, ["EConst",0,"CString",0]));
+    return TemplateParser.template_to_str_expr(ReflectionExtensions.value_at_path(template.expr, ["EConst",0,"CString",0])); 
   }
 
   // @:macro static public function test(template:Expr): Expr {
@@ -462,15 +599,41 @@ class Test {
     }
   }
 
+  @:macro static function test(template:ExprOf<String>, expected:ExprOf<String>):Expr {
+    return macro {
+      var r = HTMLTemplate.haml_like_str($template);
+      if (r == $expected){
+        Sys.println("ok");
+      } else {
+        Sys.println("=== ERROR: ");
+        Sys.println("expected: "+$expected);
+        Sys.println("got: "+r);
+      }
+    }
+  }
+
   static function main() {
-    ExprExtensions.trace("a"+"b"+"c");
 
-    trace(TemplateParser.parse_template('%div.abc'));
+      // ../haxe-mw-extensions/lib/ExprExtensions.hx:5: { expr => EBlock([{ expr => EFor({ expr => EIn({ expr => EConst(CIdent(x)), pos => #pos(Test.hx|544 col 12| },{ expr => EArrayDecl([]), pos => #pos(Test.hx:544: characters 17-19) }), pos => #pos(Test.hx:544: characters 12-19) },{ expr => EConst(CIdent(true)), pos => #pos(Test.hx:544: characters 21-25) }), pos => #pos(Test.hx:544: characters 8-25) }]), pos => #pos(Test.hx:543: lines 543-545) }
 
-assert_equal(HTMLTemplate.haml_like_str(
-'%div'),
-'<div></div>'
-);
+    // ExprExtensions.trace({ for(x in []) true; });
+
+    // test("%div.abc", "<div class=\"abc\"></div>");
+    // test(".abc", "<div class=\"abc\"></div>");
+    // test("%div.a.b", "<div class=\"a b\"></div>");
+    // test("%div#abc", "<div id=\"abc\"></div>");
+    // test("#abc", "<div id=\"abc\"></div>");
+
+    // test("#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
+    // test("#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
+    test("#abc(attr=$value )", "<div id=\"abc\" attr=\"X\"></div>");
+
+    // trace(TemplateParser.parse_template("#abc(attr=$value)"));
+
+// assert_equal(HTMLTemplate.haml_like_str(
+// '%div'),
+// '<div></div>'
+// );
     
   }
 
