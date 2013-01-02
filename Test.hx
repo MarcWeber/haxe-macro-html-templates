@@ -284,29 +284,43 @@ class TemplateParser {
     throw msg+" at bytepos "+ ps.i +": "+ps.s.substr(ps.i);
   }
 
-  static public function walk_haxe_expr(ps:ParserState) {
+  static public function walk_haxe_expr(ps:ParserState, repeat:Bool = false) {
 
     ignore_spaces(ps);
-    switch (code(ps)){
-      case 34 /* " */:
-            // parse string
-      case 40 /* ( */:
-        ps.i++; walk_haxe_expr(ps);
-        expect_char(ps, ")");
-      case 123 /* { */:
-        ps.i++; walk_haxe_expr(ps);
-        expect_char(ps, "}");
-      case _:
-        // anything else such as foo.bar
-        while (!eof(ps)){
-          var c = code(ps);
-          if ((c >= 97 && c <= 122) || c == 95 || c == 46)
-            // a-z _ .
-            ps.i++;
-          else break;
-        }
+    while (true){
+      var start = ps.i;
+      var co = code(ps);
+      switch (co){
+        case 34 /* " */:
+          // parse string
+          ps.i++;
+          while (true){
+            var c = code(ps);
+            if (c == 34){ ps.i++; break; }
+            if (c == 92 /* \ */) ps.i += 2;
+            else ps.i++;
+          }
+        case 40 /* ( */:
+          ps.i++; walk_haxe_expr(ps, true);
+          ignore_spaces(ps);
+          expect_char(ps, ")"); ps.i++;
+        case 123 /* { */:
+          ps.i++; walk_haxe_expr(ps, true);
+          ignore_spaces(ps);
+          expect_char(ps, "}"); ps.i++;
+        case _:
+          if (co == 125 /* } */ || co == 41 /* ) */) break;
+          // anything else such as foo.bar
+          while (!eof(ps)){
+            var c = code(ps);
+            if ((c >= 97 && c <= 122) /* a-z */ || (c >= 65 && c <= 90) /* A-Z */ 
+                || c == 95 /*_*/ || c == 46 /*.*/|| c == 63 /*?*/ || c == 58 /*:*/ || (c == 32 && repeat))
+              ps.i++;
+            else break;
+          }
+      }
+      if (!repeat || start == ps.i) break;
     }
-    
   }
   static public function parse_haxe_expr(ps:ParserState):E {
     var i = ps.i;
@@ -473,15 +487,14 @@ class TemplateParser {
           // tag open
           r.s("<"+name);
 
-          // attributes TODO
           for (a in attributes){
-            r.s(" ");
             switch(a) {
-              case attr_expr(e): r.expr(e);
+              case attr_expr(e_): r.expr(e.attrs(e_));
               case attr_name_value(name, value):
+                r.s(" ");
                 r.s(name+"=\""+e.quoteS(value)+"\"");
               case attr_name_expr_as_value(name, expr):
-                r.s(name+"=\"");
+                r.s(" "+name+"=\"");
                 r.expr(e.quote(expr));
                 r.s("\"");
             }
@@ -538,10 +551,10 @@ class TemplateParser {
         quoteS: function(s){ return StringTools.htmlEscape(s); },
         quote: function(e){ return macro StringTools.htmlEscape($e); },
         attrs: function(e){ return macro HTMLTemplate.attrsToHtml($e); },
-                  if_: function(cond, if_, else_){
-                    var el = else_ == null ? (macro "") : else_;
-                    return macro ($cond ? $if_ : $el);
-                },
+        if_: function(cond, if_, else_){
+                  var el = else_ == null ? (macro "") : else_;
+                  return macro ($cond ? $if_ : $el);
+              },
         for_: null
 	// EFor( it : Expr, expr : Expr );
     });
@@ -626,14 +639,18 @@ class Test {
 
     // test("#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
     // test("#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
-    test("#abc(attr=$value )", "<div id=\"abc\" attr=\"X\"></div>");
+    // test("#abc(attr=$value )", "<div id=\"abc\" attr=\"X\"></div>");
+    test("#abc(${attr: \"X\"})", "<div id=\"abc\" attr=\"X\"></div>");
+    // trace(TemplateParser.parse_template("#abc(${attr: \"X\"})"));
+
+    // test("#abc(attr=$value)zdf", "<div id=\"abc\" attr=\"X\">zdf</div>");
 
     // trace(TemplateParser.parse_template("#abc(attr=$value)"));
 
-// assert_equal(HTMLTemplate.haml_like_str(
-// '%div'),
-// '<div></div>'
-// );
+    // assert_equal(HTMLTemplate.haml_like_str(
+    // '%div'),
+    // '<div></div>'
+    // );
     
   }
 
