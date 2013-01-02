@@ -54,7 +54,8 @@ typedef CurrIndent = {
 // we just throw an Exception on error
 typedef ParserState = {
   s:String,
-  i:Int
+  i:Int,
+  pos: {min: Int, max:Int, file:String}
 };
 
 #if macro
@@ -86,6 +87,18 @@ class ExprBuilder {
 class TemplateParser {
 
   static public var autoclose = ["meta","img","link","br","hr","input","area","param","col","base"];
+
+  static public function parse_failure(ps:ParserState, msg:String) {
+    var msg = msg;
+#if macro
+    var p = ps.pos.min +ps.i;
+    // msg += " at bytepos "+ ps.i +": "+ps.s.substr(ps.i);
+    Context.error(msg, Context.makePosition({min: p, max: p, file:ps.pos.file}));
+#else
+    throw msg+" at bytepos "+ ps.i +": "+ps.s.substr(ps.i);
+#end
+  }
+
 
   static inline function code(ps: ParserState) {
     return StringTools.fastCodeAt(ps.s, ps.i);
@@ -120,13 +133,13 @@ class TemplateParser {
     return macro if (StringTools.fastCodeAt($ps.s, $ps.i) != $(exprToCode(char))) parse_failure($ps,  "expected :`"+$char+"`");
   }
 
-  static public function spaces(count:Int, p:ParserState) {
-    var i_ = p.i;
-    try{
-      while (count > 0 && is_char(p, " ")) count --;
+  static public function spaces(count:Int, ps:ParserState) {
+    var i_ = ps.i;
+    while (count > 0 && is_char(ps, " ")) { count --; ps.i++; }
+    if (count == 0)
       return true;
-    }catch(e:Dynamic){
-      p.i = i_;
+    else {
+      ps.i = i_;
       return false;
     }
   }
@@ -143,8 +156,7 @@ class TemplateParser {
     var name = "";
     while (!eof(ps)) {
       var c = code(ps);
-      if ((c >= 97 && c <= 122) || c == 95){
-        // a-z                     _
+      if ((c >= 97 && c <= 122) /* a-z */ || (c >= 48 && c <= 57) /* 0-9 */ || c == 95){
         name += ps.s.charAt(ps.i);
         ps.i++;
       } else break;
@@ -257,31 +269,30 @@ class TemplateParser {
     var contents = [];
     if (is_char(ps, "=")){
       // one line
-      parse_text(null, ps, contents);
+      ps.i++;
+      contents.push(expr(parse_haxe_expr(ps), true));
       if (!eof(ps)){  expect_char(ps, "\n"); ps.i++; }
     } else if (is_char(ps, "!")){
       // one line
       ps.i++;
-      expect_char(ps, "=");
-      ps.i--;
-      contents = [];
-      parse_text(null, ps, contents);
+      expect_char(ps, "="); ps.i++;
+      contents.push(expr(parse_haxe_expr(ps), false));
       if (!eof(ps)){ expect_char(ps, "\n"); ps.i++; }
-    } else {
+    } else if (is_char(ps, "\n")){
+      ps.i++;
       if (!eof(ps)){
-        expect_char(ps, "\n"); ps.i++;
         // now test for items having one additional indentation level ..
-        contents = [];
         parse_template_items(ii + 2, ps, contents);
+        // if (!eof(ps)) { expect_char(ps, "\n"); ps.i++;}
       }
+    } else {
+      // text after )
+      parse_text(null, ps, contents);
+      if (!eof(ps)) { expect_char(ps, "\n"); ps.i++;}
     }
     if (ArrayExtensions.contains(autoclose,name) && contents != [])
       parse_failure(ps, "tag with children found which is not expected to have childs");
     return tag(name, attributes, contents);
-  }
-
-  static public function parse_failure(ps:ParserState, msg:String) {
-    throw msg+" at bytepos "+ ps.i +": "+ps.s.substr(ps.i);
   }
 
   static public function walk_haxe_expr(ps:ParserState, repeat:Bool = false) {
@@ -297,6 +308,15 @@ class TemplateParser {
           while (true){
             var c = code(ps);
             if (c == 34){ ps.i++; break; }
+            if (c == 92 /* \ */) ps.i += 2;
+            else ps.i++;
+          }
+        case 39 /* ' */:
+          // parse string
+          ps.i++;
+          while (true){
+            var c = code(ps);
+            if (c == 39){ ps.i++; break; }
             if (c == 92 /* \ */) ps.i += 2;
             else ps.i++;
           }
@@ -380,23 +400,25 @@ class TemplateParser {
       } else {
         // text
         var s = "";
-        var next = code(ps);
-        while (next != null && next != 92 /* \n */){
-          if (next == 92 /* \n */)
-            break;
+        var next = 92;
+        while (!eof(ps)){
+          var next = code(ps);
+          if (next == 92 /* \n */) break;
           else if (next == 36 /*$*/ || next == 33)
             // interpolation starts, so end
             break;
           else if (next == 92 /* \ */){
             // quote next char, ignore
-            ps.i++;
+            ps.i += 2;
           } else {
             // this can be optimized by using substring
             s += ps.s.charAt(ps.i);
+            ps.i++;
           }
         }
         if (s != "")
           r.push(text(s));
+        if (next == 92) break;
       }
     }
   }
@@ -430,12 +452,12 @@ class TemplateParser {
         if (code == 33){ expect_char(ps, "="); ps.i++; quoted = false; }
         r.push(expr(parse_haxe_expr(ps), quoted));
         if (ii==null) return;
-        expect_char(ps, "\n"); ps.i++;
+        if (!eof(ps)) { expect_char(ps, "\n"); ps.i++; }
       } else {
       // must be a text line ..
         parse_text_line(ps, r);
         if (ii==null) return;
-        expect_char(ps, "\n"); ps.i++;
+        if (!eof(ps)) { expect_char(ps, "\n"); ps.i++; }
       }
     }
   }
@@ -520,12 +542,17 @@ class TemplateParser {
   }
 #end
 
-  public static function parse_template(s:String):TemplateContent {
+  public static function parse_template(pos, s:String):TemplateContent {
     // TODO: introduce caching!
-    var ps = { s: s, i:0}
+    var ps = { s: s, i:0, pos: pos};
+    // \n at the beginning? ignore
+    if (StringTools.fastCodeAt(ps.s,0) == 10)
+      ps.i++;
+
+    var first_line_pos = ps.i;
     while (is_char(ps, " ")) ps.i++;
-    var initial_indent = ps.i;
-    ps.i = 0;
+    var initial_indent = ps.i - first_line_pos;
+    ps.i = first_line_pos;
     var r = [];
     parse_template_items(initial_indent, ps, r);
     return r;
@@ -533,8 +560,8 @@ class TemplateParser {
 
 
 #if macro
-  public static function template_to_str_expr(s:String):Expr {
-    return template_content_to_expr(parse_template(s), {
+  public static function template_to_str_expr(pos: {file:String, min:Int, max:Int}, s:String):Expr {
+    return template_content_to_expr(parse_template(pos, s), {
         joinItems: function(items){
                     return switch(items.length) {
                       case 0: macro $("");
@@ -584,7 +611,8 @@ class HTMLTemplate {
 #end
 
   @:macro static public function haml_like_str(template:Expr): Expr {
-    return TemplateParser.template_to_str_expr(ReflectionExtensions.value_at_path(template.expr, ["EConst",0,"CString",0])); 
+    var e = TemplateParser.template_to_str_expr(Context.getPosInfos(template.pos), ReflectionExtensions.value_at_path(template.expr, ["EConst",0,"CString",0])); 
+    return e;
   }
 
   // @:macro static public function test(template:Expr): Expr {
@@ -604,14 +632,6 @@ class HTMLTemplate {
 
 class Test {
 
-  static function assert_equal(a, b) {
-    if (a != b){
-      trace(a);
-      trace("expected");
-      trace(b);
-    }
-  }
-
   @:macro static function test(template:ExprOf<String>, expected:ExprOf<String>):Expr {
     return macro {
       var r = HTMLTemplate.haml_like_str($template);
@@ -620,7 +640,7 @@ class Test {
       } else {
         Sys.println("=== ERROR: ");
         Sys.println("expected: "+$expected);
-        Sys.println("got: "+r);
+        Sys.println("got     : "+r);
       }
     }
   }
@@ -629,21 +649,46 @@ class Test {
 
       // ../haxe-mw-extensions/lib/ExprExtensions.hx:5: { expr => EBlock([{ expr => EFor({ expr => EIn({ expr => EConst(CIdent(x)), pos => #pos(Test.hx|544 col 12| },{ expr => EArrayDecl([]), pos => #pos(Test.hx:544: characters 17-19) }), pos => #pos(Test.hx:544: characters 12-19) },{ expr => EConst(CIdent(true)), pos => #pos(Test.hx:544: characters 21-25) }), pos => #pos(Test.hx:544: characters 8-25) }]), pos => #pos(Test.hx:543: lines 543-545) }
 
+  var value = "X";
     // ExprExtensions.trace({ for(x in []) true; });
 
-    // test("%div.abc", "<div class=\"abc\"></div>");
-    // test(".abc", "<div class=\"abc\"></div>");
-    // test("%div.a.b", "<div class=\"a b\"></div>");
-    // test("%div#abc", "<div id=\"abc\"></div>");
-    // test("#abc", "<div id=\"abc\"></div>");
+    // test("
+    //     %div", "<div></div>");
+    test("
+    %div
+    ", "<div></div>");
 
-    // test("#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
-    // test("#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
-    // test("#abc(attr=$value )", "<div id=\"abc\" attr=\"X\"></div>");
+    test("%div", "<div></div>");
+    test("%div.abc", "<div class=\"abc\"></div>");
+    test(".abc", "<div class=\"abc\"></div>");
+    test("%div.a.b", "<div class=\"a b\"></div>");
+    test("%div#abc", "<div id=\"abc\"></div>");
+    test("#abc", "<div id=\"abc\"></div>");
+
+    test("#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
+    test("#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
+    test("#abc(attr=$value )", "<div id=\"abc\" attr=\"X\"></div>");
     test("#abc(${attr: \"X\"})", "<div id=\"abc\" attr=\"X\"></div>");
-    // trace(TemplateParser.parse_template("#abc(${attr: \"X\"})"));
+    test("#abc(attr=$value)zdf", "<div id=\"abc\" attr=\"X\">zdf</div>");
+    test("#abc(attr=$value)='<zdf>'", "<div id=\"abc\" attr=\"X\">&lt;zdf&gt;</div>");
+    test("#abc(attr=$value)!='<zdf>'", "<div id=\"abc\" attr=\"X\"><zdf></div>");
+    test("
+      %div
+      %div
+    ","<div></div><div></div>");
 
-    // test("#abc(attr=$value)zdf", "<div id=\"abc\" attr=\"X\">zdf</div>");
+    trace(TemplateParser.parse_template(null, "
+      #abc(attr=$value)
+        #inner
+          #inner2"));
+
+    test("
+      #abc(attr=$value)
+        #inner
+          .inner2
+    ", "<div id=\"abc\" attr=\"X\"><div id=\"inner\"><div class=\"inner2\"></div></div></div>");
+
+    // trace(TemplateParser.parse_template("#abc(attr=$value)='<zdf>'"));
 
     // trace(TemplateParser.parse_template("#abc(attr=$value)"));
 
