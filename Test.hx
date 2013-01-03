@@ -111,6 +111,31 @@ class Test {
     ", "<div>1</div><div>2</div><div>3</div>");
 
 
+    test(24, "
+      :javascript
+        alert('abc');
+    ", "<script type='text/javascript'>//<![CDATA[alert('abc');//]]></script>");
+
+    test(25, "
+      :css
+        div {
+          height;
+        }
+    ", "<style type='text/css'>//<![CDATA[div {   height; }//]]></style>");
+
+    test(25, "
+      %div
+        -#
+          multi line
+          comment
+    ", "<div></div>");
+
+    test(26, "
+      %div
+        -# single line comment
+      %div
+    ", "<div></div> <div></div>");
+
     // trace(TemplateParser.parse_template(null, "
     //   %div
     //     The brown fox is running ${'<here>'}
