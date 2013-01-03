@@ -104,10 +104,11 @@ class Test {
     // "));
 
 
+     // mind the > omitting the space after the tag
     test(23, "
       :for (i in [1,2,3])
-        %div=(''+i)
-    ", "<div>1</div> <div>2</div> <div>3</div> ");
+        %div>=(''+i)
+    ", "<div>1</div><div>2</div><div>3</div>");
 
 
     // trace(TemplateParser.parse_template(null, "
