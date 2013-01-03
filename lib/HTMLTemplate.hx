@@ -1,11 +1,6 @@
 import ArrayExtensions;
-import com.mindrocks.text.Parser;
 import ReflectionExtensions;
 import ExprExtensions;
-using com.mindrocks.text.Parser;
-import com.mindrocks.functional.Functional;
-using com.mindrocks.functional.Functional;
-using com.mindrocks.macros.LazyMacro;
 
 import haxe.macro.Expr;
 import haxe.macro.Context;
@@ -41,11 +36,6 @@ enum ParsedTemplateItem {
 }
 typedef TemplateContent = Array<ParsedTemplateItem>;
 // }}}
-
-typedef CurrIndent = {
-  s:String,
-  p:Parser<String, Void>
-}
 
 // parsing the template files is that simple, no backtracking required.
 // we just throw an Exception on error
