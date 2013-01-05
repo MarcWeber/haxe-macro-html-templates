@@ -1,6 +1,6 @@
-import ArrayExtensions;
-import ReflectionExtensions;
-import ExprExtensions;
+import mw.ArrayExtensions;
+import mw.ReflectionExtensions;
+import mw.ExprExtensions;
 
 import haxe.macro.Expr;
 import haxe.macro.Context;
@@ -625,7 +625,7 @@ class TemplateParser {
     filter.set('javascript', function(e){ return macro "<script type='text/javascript'>//<![CDATA["+$e+ "//]]></script>"; });
     filter.set('css', function(e){ return macro "<style type='text/css'>//<![CDATA["+$e+ "//]]></style>" ; });
 
-    return template_content_to_expr(parse_template(pos, s, HashExtensions.keysAsArray(filter)), last_no_space, {
+    return template_content_to_expr(parse_template(pos, s, mw.HashExtensions.keysAsArray(filter)), last_no_space, {
         filter: filter,
         joinItems: function(items){
                     return switch(items.length) {
@@ -691,19 +691,5 @@ class HTMLTemplate {
     var e = TemplateParser.template_to_str_expr(Context.getPosInfos(template.pos), ReflectionExtensions.value_at_path(template.expr, ["EConst",0,"CString",0])); 
     return e;
   }
-
-  // @:macro static public function test(template:Expr): Expr {
-  //   var e = macro {
-  //     var c = 7;
-  //     var d = 8;
-  //   };
-  //   trace(e);
-  //   return ReflectionExtensions.value_at_path(e.expr, ["EBlock",0]);
-  // }
-
-  // @:macro static public function test2(e:Expr): Expr {
-  //   trace(Context.getLocalType());
-  //   return ReflectionExtensions.value_at_path(e.expr, ["EBlock",0]);
-  // }
 }
 

@@ -1,5 +1,4 @@
--cp lib
--cp ../haxe-mw-extensions/lib
+-cp ../haxe-mw-extensions
 -main Test
 --php-front index.php
 --remap neko:php
