@@ -1,6 +1,6 @@
+package mw;
 import mw.ArrayExtensions;
 import mw.ReflectionExtensions;
-import mw.ExprExtensions;
 
 import haxe.macro.Expr;
 import haxe.macro.Context;
@@ -58,11 +58,11 @@ class ExprBuilder {
     if (items.length > 0){
       var last_s = ReflectionExtensions.value_at_path(ArrayExtensions.last(items).expr, ["EConst",0,"CString",0]);
       if (last_s != null){
-        items[items.length-1] = macro $(last_s + s);
+        items[items.length-1] = macro $v{last_s + s};
         return;
       }
     }
-    items.push(macro $(s));
+    items.push(macro $v{s});
   }
 
   public function expr(e:Expr) {
@@ -100,7 +100,7 @@ class TemplateParser {
 
   @:macro static function c(char_str: ExprOf<String>):ExprOf<Int> {
     var i:Int = StringTools.fastCodeAt(ReflectionExtensions.value_at_path(char_str.expr, ["EConst",0,"CString",0]), 0);
-    return macro $(i);
+    return macro $v{i};
   }
 
   static function exprToCode(char_str:Expr):Int{
@@ -120,11 +120,11 @@ class TemplateParser {
   }
 
   @:macro static function is_char(char:ExprOf<String>):ExprOf<Bool> {
-    return macro (!eof(ps) && StringTools.fastCodeAt(ps.s, ps.i) == $(exprToCode(char)));
+    return macro (!eof(ps) && StringTools.fastCodeAt(ps.s, ps.i) == $v{exprToCode(char)});
   }
 
   @:macro static function expect_char(char:ExprOf<String>):ExprOf<Bool> {
-    return macro if (StringTools.fastCodeAt(ps.s, ps.i) != $(exprToCode(char))) parse_failure(ps,  "expected :`"+$char+"`");
+    return macro if (StringTools.fastCodeAt(ps.s, ps.i) != $v{exprToCode(char)}) parse_failure(ps,  "expected :`"+$char+"`");
   }
 
   static public function spaces(count:Int, ps:ParserState) {
@@ -331,6 +331,9 @@ class TemplateParser {
           ps.i++; walk_haxe_expr(ps, true);
           ignore_spaces(ps);
           expect_char("}"); ps.i++;
+        case 32 /* ' ' */:
+          if (repeat) ps.i++;
+          else break;
         case _:
           if (co == 125 /* } */ || co == 41 /* ) */) break;
           // anything else such as foo.bar
@@ -340,13 +343,14 @@ class TemplateParser {
                 || c == 95 /*_*/ || c == 46 /*.*/
                 || c == 43 /*+*/ || c == 115 /*-*/
                 || c == 42 /***/ || c == 47 /*/*/
-                || c == 63 /*?*/ || c == 58 /*:*/ || (c == 32 && repeat)
+                || c == 63 /*?*/ || c == 58 /*:*/
                 )
               ps.i++;
             else break;
           }
       }
-      if (!repeat || start == ps.i) break;
+
+      if (start == ps.i) break;
     }
   }
   static public function parse_haxe_expr(ps:ParserState):E {
@@ -484,6 +488,7 @@ class TemplateParser {
       // expr lines:
       if (code == 61 /*=*/ || code == 33 /*!*/){
         var quoted = true;
+        ps.i++;
         if (code == 33){ expect_char("="); ps.i++; quoted = false; }
         r.push(expr(parse_haxe_expr(ps), quoted));
         if (ii==null) return;
@@ -625,11 +630,11 @@ class TemplateParser {
     filter.set('javascript', function(e){ return macro "<script type='text/javascript'>//<![CDATA["+$e+ "//]]></script>"; });
     filter.set('css', function(e){ return macro "<style type='text/css'>//<![CDATA["+$e+ "//]]></style>" ; });
 
-    return template_content_to_expr(parse_template(pos, s, mw.HashExtensions.keysAsArray(filter)), last_no_space, {
+    var expr = template_content_to_expr(parse_template(pos, s, mw.HashExtensions.keysAsArray(filter)), last_no_space, {
         filter: filter,
         joinItems: function(items){
                     return switch(items.length) {
-                      case 0: macro $("");
+                      case 0: macro $v{""};
                       case 1: items[0];
                       case _:
                         var c = items.shift();
@@ -642,7 +647,7 @@ class TemplateParser {
                   },
         quoteS: function(s){ return StringTools.htmlEscape(s); },
         quote: function(e){ return macro StringTools.htmlEscape($e); },
-        attrs: function(e){ return macro HTMLTemplate.attrsToHtml($e); },
+        attrs: function(e){ return macro mw.HTMLTemplate.attrsToHtml($e); },
         if_: function(cond, if_, else_){
                   var el = else_ == null ? (macro "") : else_;
                   return macro ($cond ? $if_ : $el);
@@ -662,6 +667,8 @@ class TemplateParser {
         }
 	// EFor( it : Expr, expr : Expr );
     });
+
+    return expr;
   }
 #end
 

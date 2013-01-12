@@ -2,11 +2,11 @@
 import haxe.macro.Expr;
 import haxe.macro.Context;
 
-class Test {
+class TestHTMLParser {
 
   @:macro static function test(nr:ExprOf<Int>, template:ExprOf<String>, expected:ExprOf<String>):Expr {
     return macro {
-      var r = HTMLTemplate.haml_like_str($template);
+      var r = mw.HTMLTemplate.haml_like_str($template);
       if (r == $expected){
         Sys.println("ok");
       } else {
@@ -136,17 +136,25 @@ class Test {
       %div
     ", "<div></div> <div></div>");
 
-    // trace(TemplateParser.parse_template(null, "
+    /* expected compilation failure, error location should be on bad_method */
+    // var m = new Hash();
+    // test(26, "
     //   %div
-    //     The brown fox is running ${'<here>'}
-    //     and !{'<there>'}
-    // "));
+    //     =m.bad_method()
+    //   %div
+    // ", "failure expected");
+      
 
 
-    // trace(TemplateParser.parse_template("#abc(attr=$value)='<zdf>'"));
+    /* expected runtime failure, location should point to d.x.y */
+    trace("EXPECTED FAILURE, trace should point to d.x.y");
+    var d = null;
+    test(26, "
+      %div
+        =d.x.y
+      %div
+    ", "failure expected");
 
-    // trace(TemplateParser.parse_template("#abc(attr=$value)"));
-    
   }
 
   static public function sample() {

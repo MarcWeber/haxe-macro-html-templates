@@ -1,3 +1,3 @@
--neko Test.n
--main Test
+-neko TestHTMLParser.n
+-main TestHTMLParser
 -cp ../haxe-mw-extensions
