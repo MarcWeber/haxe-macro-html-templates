@@ -7,7 +7,7 @@ import haxe.macro.Context;
 
 
 // for debugging return string
-typedef E = 
+typedef E =
 #if macro
   Expr
 #else
@@ -31,8 +31,9 @@ enum ParsedTemplateItem {
 
   // for (..) true; will be parsed true will then be substituted by the content
   control_for(for_:E, content: TemplateContent);
-  
-  // case ..
+
+  // case .. values should have as much items as cases in switch_
+  control_switch(switch_:E, values: Array<TemplateContent>, default_: TemplateContent);
 }
 typedef TemplateContent = Array<ParsedTemplateItem>;
 // }}}
@@ -98,7 +99,7 @@ class TemplateParser {
     return StringTools.fastCodeAt(ps.s, ps.i);
   }
 
-  @:macro static function c(char_str: ExprOf<String>):ExprOf<Int> {
+  macro static function c(char_str: ExprOf<String>):ExprOf<Int> {
     var i:Int = StringTools.fastCodeAt(ReflectionExtensions.value_at_path(char_str.expr, ["EConst",0,"CString",0]), 0);
     return macro $v{i};
   }
@@ -107,7 +108,7 @@ class TemplateParser {
     return StringTools.fastCodeAt(ReflectionExtensions.value_at_path(char_str.expr, ["EConst",0,"CString",0]), 0);
   }
 
-  @:macro static function is_string(string:ExprOf<String>):ExprOf<Bool> {
+  macro static function is_string(string:ExprOf<String>):ExprOf<Bool> {
     var s = ReflectionExtensions.value_at_path(string.expr, ["EConst",0,"CString",0]);
     return macro {
       if (ps.s.substr(ps.i, $string.length) == $string){
@@ -119,12 +120,12 @@ class TemplateParser {
     };
   }
 
-  @:macro static function is_char(char:ExprOf<String>):ExprOf<Bool> {
+  macro static function is_char(char:ExprOf<String>):ExprOf<Bool> {
     return macro (!eof(ps) && StringTools.fastCodeAt(ps.s, ps.i) == $v{exprToCode(char)});
   }
 
-  @:macro static function expect_char(char:ExprOf<String>):ExprOf<Bool> {
-    return macro if (StringTools.fastCodeAt(ps.s, ps.i) != $v{exprToCode(char)}) parse_failure(ps,  "expected :`"+$char+"`");
+  macro static function expect_char(char:ExprOf<String>):ExprOf<Bool> {
+    return macro if (StringTools.fastCodeAt(ps.s, ps.i) != $v{exprToCode(char)}) parse_failure(ps,  "expected :`"+$char+"` at"+$v{char.pos+""});
   }
 
   static public function spaces(count:Int, ps:ParserState) {
@@ -213,7 +214,7 @@ class TemplateParser {
     // name:String, attributes:Array<Attribute>, contents:TemplateContent
     switch (code(ps)) {
       // tag name after %
-      case 37 /*%*/: 
+      case 37 /*%*/:
         // parse tag name
         ps.i++; name = parse_name_like(ps);
       case _:
@@ -339,7 +340,7 @@ class TemplateParser {
           // anything else such as foo.bar
           while (!eof(ps)){
             var c = code(ps);
-            if ((c >= 97 && c <= 122) /* a-z */ || (c >= 65 && c <= 90) /* A-Z */ 
+            if ((c >= 97 && c <= 122) /* a-z */ || (c >= 65 && c <= 90) /* A-Z */
                 || c == 95 /*_*/ || c == 46 /*.*/
                 || c == 43 /*+*/ || c == 115 /*-*/
                 || c == 42 /***/ || c == 47 /*/*/
@@ -364,6 +365,13 @@ class TemplateParser {
 #end
   }
 
+  static public inline function rest_of_line(ps:ParserState) {
+      var start = ps.i;
+      while (!eof(ps) && !is_char("\n")) ps.i++;
+      expect_char("\n"); ps.i++;
+      return ps.s.substring(start, ps.i -1);
+  }
+
   // for, while etc
   static public function parse_code(ii:Int, ps:ParserState):ParsedTemplateItem {
     expect_char(":"); ps.i++;
@@ -381,7 +389,7 @@ class TemplateParser {
       if (spaces(ii, ps)){
         if (is_string(":else")){
           expect_char("\n"); ps.i++;
-          parse_template_items(ii+2, ps, else_content); 
+          parse_template_items(ii+2, ps, else_content);
         } else {
           // we're done, no else branch
           ps.i = i;
@@ -394,7 +402,7 @@ class TemplateParser {
       var i = ps.i;
       while (!is_char("\n") && !eof(ps)) ps.i++;
       var for_s = ps.s.substr(i, ps.i-i);
-      var for_ = 
+      var for_ =
 #if macro
           Context.parse(for_s, makePos(ps));
 #else
@@ -402,14 +410,70 @@ class TemplateParser {
 #end
       ps.i++; // \n
       var for_content = [];
-      parse_template_items(ii+2, ps, for_content); 
+      parse_template_items(ii+2, ps, for_content);
       return control_for(for_, for_content);
+    } else if (is_string('switch')) {
+
+#if macro
+      var pos = makePos(ps);
+#else
+      var pos = null;
+#end
+      /* because ESwitch has special Case type I don't
+         think we can easily use Context.parse to get any useful
+         result. Thus we parse all switch and case lines, and make Context
+         parse the whole thing with empty values
+       */
+
+      // parse switch:
+
+      // first switch line:
+      var code = "switch "+rest_of_line(ps)+"{\n";
+
+      var default_content: TemplateContent = null;
+      var cases = [];
+
+      // parse case lines
+      var done = false;
+
+      while (!done){
+        done = true;
+
+        var i = ps.i; // remember starting position. If there is no match after
+                    // having parsed spaces parser state can be reset easily
+        if (spaces(ii, ps) ){
+          expect_char(":");
+          ps.i++;
+          var content = [];
+          if (is_string("default:")){
+            expect_char("\n"); ps.i++;
+            parse_template_items(ii+2, ps, content);
+            default_content = content;
+          } else if (is_string("case ")){
+            done = false;
+            code += "case "+ rest_of_line(ps)+"\n";
+            parse_template_items(ii+2, ps, content);
+            cases.push(content);
+          } else ps.i = i;
+        } else ps.i = i;
+        // add content lines as empty lines so that if ther is an error such as
+        // forgetting: the parser error location will be correct
+        for (i in 2... ps.s.substring(ps.i, i).split("\n").length) code += "\n";
+      }
+      code += "\n}";
+      return control_switch(
+      #if macro
+          Context.parse(code, pos)
+      #else
+          null
+      #end,
+          cases, default_content);
     } else {
       // try filter ..
       var filter_name = parse_name_like(ps);
       expect_char("\n"); ps.i++;
       var content = [];
-      parse_template_items(ii+2, ps, content); 
+      parse_template_items(ii+2, ps, content);
       if (ArrayExtensions.contains(ps.available_filters, filter_name)){
         return filter(filter_name, content); // dummy, parse_failure throwsn exception
       } else {
@@ -544,7 +608,8 @@ class TemplateParser {
         attrs: Expr -> Expr, // expr is {} or hash, should return expr evaluating to html
         for_: Expr -> Expr -> Expr,
         if_: Expr -> Expr -> Expr -> Expr,
-        filter: Hash<Expr -> Expr>,
+        switch_: Expr -> Array<Expr> -> Null<Expr> -> Expr,
+        filter: Map<String, Expr -> Expr>,
         joinItems: Array<Expr> -> Expr, // this may try to optimize adjecent CString exprs
         quote: Expr -> Expr, // Expr evaluates to str, should return something quoting it
         quoteS: String -> String // quote string for HTML
@@ -558,7 +623,7 @@ class TemplateParser {
       switch(pti) {
         case text(s):
           r.s(s);
-        case expr(expr, quoted): 
+        case expr(expr, quoted):
           var e_ = expr;
           if (quoted) e_ = e.quote(e_);
           r.expr(e_);
@@ -596,6 +661,10 @@ class TemplateParser {
           r.expr(e.if_(cond, template_content_to_expr(then_, false, e), else_ == null ? null : template_content_to_expr(else_, false, e)));
         case control_for(for_, content ):
           r.expr(e.for_(for_, template_content_to_expr(content, false, e) ));
+        case control_switch(cond, cases, default_):
+          r.expr(e.switch_(cond,
+                      ArrayExtensions.mapA(cases, function(x){ return template_content_to_expr(x, false, e); }),
+                      default_ == null ? null : template_content_to_expr(default_, false, e)));
       }
     }
     return e.joinItems(r.items);
@@ -604,9 +673,9 @@ class TemplateParser {
 
   public static function parse_template(pos, s:String, available_filters: Array<String>):TemplateContent {
     // TODO: introduce caching!
-    var ps = { 
-       s: s, 
-       i:0, 
+    var ps = {
+       s: s,
+       i:0,
        pos: pos,
        available_filters: available_filters
     };
@@ -626,7 +695,7 @@ class TemplateParser {
 
 #if macro
   public static function template_to_str_expr(pos: {file:String, min:Int, max:Int}, s:String, last_no_space:Bool = true):Expr {
-    var filter = new Hash();
+    var filter = new Map();
     filter.set('javascript', function(e){ return macro "<script type='text/javascript'>//<![CDATA["+$e+ "//]]></script>"; });
     filter.set('css', function(e){ return macro "<style type='text/css'>//<![CDATA["+$e+ "//]]></style>" ; });
 
@@ -664,6 +733,26 @@ class TemplateParser {
                 }
               case _: throw "unexpected "+for_.expr;
             }
+        },
+        switch_: function(e_switch, cases, default_){
+          var e_s = {
+            pos: e_switch.pos,
+            expr: switch (e_switch.expr){
+              case ESwitch(e, cs, _):
+                ESwitch(e,
+                  ArrayExtensions.mapAI(cs, function(i, c){
+                    return {
+                      guard: c.guard, // here we drop the empty value we got when parsing inserting out template contents instead
+                      expr: cases[i],
+                      values: c.values
+                    };
+                  }),
+                  default_ // same for default
+                );
+              case _: throw "unexpected";
+            }
+          };
+          return {pos: e_switch.pos, expr: EParenthesis(e_s) };
         }
 	// EFor( it : Expr, expr : Expr );
     });
@@ -671,7 +760,6 @@ class TemplateParser {
     return expr;
   }
 #end
-
 }
 
 /*
@@ -682,8 +770,8 @@ class HTMLTemplate {
 #if !macro
   static public function attrsToHtml(a:Dynamic) {
     var s = "";
-    if (Std.is(a, Hash)){
-      var h: Hash<String> = cast(a);
+    if (Std.is(a, Map)){
+      var h: Map<String,String> = cast(a);
       for(k in h.keys())
         s+=" "+k+"=\""+ StringTools.htmlEscape(h.get(k))+"\"";
     } else {
@@ -694,8 +782,11 @@ class HTMLTemplate {
   }
 #end
 
-  @:macro static public function haml_like_str(template:Expr): Expr {
-    var e = TemplateParser.template_to_str_expr(Context.getPosInfos(template.pos), ReflectionExtensions.value_at_path(template.expr, ["EConst",0,"CString",0])); 
+  // using StringBuf for php is slower than using $s .= ..;
+  // other backends may differ
+  // for this reason there is no need to think about changing the implementation
+  macro static public function str(template:Expr): Expr {
+    var e = TemplateParser.template_to_str_expr(Context.getPosInfos(template.pos), ReflectionExtensions.value_at_path(template.expr, ["EConst",0,"CString",0]));
     return e;
   }
 }

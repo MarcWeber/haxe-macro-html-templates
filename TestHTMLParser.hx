@@ -4,11 +4,11 @@ import haxe.macro.Context;
 
 class TestHTMLParser {
 
-  @:macro static function test(nr:ExprOf<Int>, template:ExprOf<String>, expected:ExprOf<String>):Expr {
+  macro static function test(nr:ExprOf<Int>, template:ExprOf<String>, expected:ExprOf<String>):Expr {
     return macro {
-      var r = mw.HTMLTemplate.haml_like_str($template);
+      var r = mw.HTMLTemplate.str($template);
       if (r == $expected){
-        Sys.println("ok");
+        Sys.println($nr+" ok");
       } else {
         Sys.println("=== ERROR: "+$nr);
         Sys.println("expected: "+$expected);
@@ -143,8 +143,34 @@ class TestHTMLParser {
     //     =m.bad_method()
     //   %div
     // ", "failure expected");
-      
 
+    var value = "first";
+    test(27, "
+      :switch (value)
+      :case \"first\":
+        %div first_text
+      :case \"second\":
+        %div second_text
+      :default:
+    ", "<div>first_text</div> ");
+
+    test(28, "
+      :switch (\"none\")
+      :case \"first\":
+        %div first_text
+      :default:
+        %div default_text
+    ", "<div>default_text</div> ");
+
+
+    test(29, "
+    :for (i in [1,2,3])
+      %div
+        some
+        %ul
+          %li.list
+            %a(href=\"link\")
+    ", "<div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> <div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> <div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> ");
 
     /* expected runtime failure, location should point to d.x.y */
     trace("EXPECTED FAILURE, trace should point to d.x.y");
@@ -161,7 +187,7 @@ class TestHTMLParser {
     // Example illustrating all features.
     // If you don't know this style have a look at haml-lang.org to get an idea.
 
-//     var html = HTMLTemplate.haml_like_str('
+//     var html = HTMLTemplate.str('
 //     %div(class="first_level")%div.second_level foo
 //     %p
 //       some multiline text
