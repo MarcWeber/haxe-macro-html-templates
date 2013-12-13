@@ -1,3 +1,4 @@
 -neko TestHTMLParser.n
 -main TestHTMLParser
 -cp ../haxe-mw-extensions
+-cp src

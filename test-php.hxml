@@ -1,5 +1,6 @@
 -cp ../haxe-mw-extensions
 -cp ../tinkerbell/src
+-cp src
 -main TestHTMLParser
 --php-front index.php
 --remap neko:php

@@ -1,6 +1,0 @@
-<project name="haxe-macro-html-templates" url="http://github.com/MarcWeber/haxe-macro-html-templates" license="GPL">
-    <user name="MarcWeber"/>
-    <tag  v="cross"/>
-    <description>Minimal haml like template library for haxe</description>
-    <version name="0.1">haxe 3</version>
-</project>

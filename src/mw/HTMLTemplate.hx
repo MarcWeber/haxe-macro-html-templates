@@ -663,7 +663,7 @@ class TemplateParser {
           r.expr(e.for_(for_, template_content_to_expr(content, false, e) ));
         case control_switch(cond, cases, default_):
           r.expr(e.switch_(cond,
-                      ArrayExtensions.mapA(cases, function(x){ return template_content_to_expr(x, false, e); }),
+                      ArrayExtensions.map_A(cases, function(x){ return template_content_to_expr(x, false, e); }),
                       default_ == null ? null : template_content_to_expr(default_, false, e)));
       }
     }
@@ -740,7 +740,7 @@ class TemplateParser {
             expr: switch (e_switch.expr){
               case ESwitch(e, cs, _):
                 ESwitch(e,
-                  ArrayExtensions.mapAI(cs, function(i, c){
+                  ArrayExtensions.map_Ai(cs, function(c, i){
                     return {
                       guard: c.guard, // here we drop the empty value we got when parsing inserting out template contents instead
                       expr: cases[i],
