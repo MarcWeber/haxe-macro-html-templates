@@ -77,23 +77,33 @@ class TemplateParser {
 
   static public var autoclose = ["meta","img","link","br","hr","input","area","param","col","base"];
 
-#if macro
   static public function makePos(ps: ParserState) {
+#if macro
     var p = ps.pos.min +ps.i;
     return Context.makePosition({min: p, max: p, file:ps.pos.file});
-  }
+#else
+    return {file: null, min: ps.i, max: 0};
 #end
+  }
 
   static public function parse_failure(ps:ParserState, msg:String) {
     var msg = msg;
 #if macro
     // msg += " at bytepos "+ ps.i +": "+ps.s.substr(ps.i);
+    //throw(msg);
     Context.error(msg, makePos(ps));
 #else
-    throw msg+" at bytepos "+ ps.i +": "+ps.s.substr(ps.i);
+    throw msg+" at bytepos "+ ps.i +": str till; '"+ps.s.substr(ps.i)+"'";
 #end
   }
 
+  static inline function code_no_eof(ps: ParserState){
+    if (eof(ps)){
+      throw "bad";
+      parse_failure(ps, "eof unexpected");
+    }
+    return StringTools.fastCodeAt(ps.s, ps.i);
+  }
 
   static inline function code(ps: ParserState) {
     return StringTools.fastCodeAt(ps.s, ps.i);
@@ -125,7 +135,9 @@ class TemplateParser {
   }
 
   macro static function expect_char(char:ExprOf<String>):ExprOf<Bool> {
-    return macro if (StringTools.fastCodeAt(ps.s, ps.i) != $v{exprToCode(char)}) parse_failure(ps,  "expected :`"+$char+"` at"+$v{char.pos+""});
+    return macro {
+      if (StringTools.fastCodeAt(ps.s, ps.i) != $v{exprToCode(char)}) parse_failure(ps,  "expected :`"+$char+"` at"+$v{char.pos+" got: "}+ StringTools.fastCodeAt(ps.s, ps.i));
+    };
   }
 
   static public function spaces(count:Int, ps:ParserState) {
@@ -159,24 +171,12 @@ class TemplateParser {
     return name;
   }
 
-  static public function parse_attr_value(ps) {
-    var c = code(ps);
-    if (c == 34 /*"*/ || c == 39 /* ' */)
-      ps.i++;
-    else
-      parse_failure(ps, "attr value expected quoted by ' or \"");
-    var start = ps.i;
-    while (!eof(ps) && !is_char("\"") && !is_char("'")) ps.i++;
-    ps.i++;
-    return ps.s.substr(start, ps.i - start -1);
-  }
-
   static public function parse_tag(ii:Int, ps:ParserState):ParsedTemplateItem {
     var name = 'div';
     var attributes = [];
     var add_space = true;
 
-    var add_attr = function(name, value){
+    var merge_attr = function(name, value){
       // add to existing class entry:
       var attr_added = false;
       for(i in 0...attributes.length){
@@ -226,11 +226,11 @@ class TemplateParser {
         case 46 /*.*/:
           ps.i++;
           var name = parse_name_like(ps);
-          add_attr("class", name);
+          merge_attr("class", name);
         case 35 /*#*/:
           ps.i++;
           var name = parse_name_like(ps);
-          add_attr("id", name);
+          merge_attr("id", name);
         case _:
           break;
       }
@@ -251,11 +251,16 @@ class TemplateParser {
             // hard coded name value pair
             var name = parse_name_like(ps);
             expect_char("="); ps.i++;
-            if (is_char("$")){
+            var c = code(ps);
+            if (c == 34 /*"*/ || c == 39 /* ' */){
               ps.i++;
-              attributes.push(attr_name_expr_as_value(name, parse_haxe_expr(ps)));
+              var start = ps.i;
+              while (!eof(ps) && !is_char("\"") && !is_char("'")) ps.i++;
+              ps.i++;
+              var value = ps.s.substr(start, ps.i - start -1);
+              merge_attr(name, value);
             } else {
-              add_attr(name, parse_attr_value(ps));
+              attributes.push(attr_name_expr_as_value(name, parse_haxe_expr(ps)));
             }
           }
 
@@ -294,82 +299,191 @@ class TemplateParser {
       parse_text_line(ps, contents, true);
       if (!eof(ps)) { expect_char("\n"); ps.i++;}
     }
-    if (ArrayExtensions.contains(autoclose,name) && contents != [])
+    if (ArrayExtensions.contains(autoclose,name) && contents.length > 0)
       parse_failure(ps, "tag with children found which is not expected to have childs");
     return tag(name, attributes, contents, add_space);
   }
 
-  static public function walk_haxe_expr(ps:ParserState, repeat:Bool = false) {
+  static public function walk_str(ps:ParserState):Bool {
+      var co = code_no_eof(ps);
 
-    ignore_spaces(ps);
-    while (true){
-      var start = ps.i;
-      var co = code(ps);
-      switch (co){
-        case 34 /* " */:
-          // parse string
+      if (co == 34 /* " */){
+          // parse string "
           ps.i++;
           while (true){
-            var c = code(ps);
-            if (c == 34){ ps.i++; break; }
+            var c = code_no_eof(ps);
+            if (c == 34){ ps.i++; return true; }
             if (c == 92 /* \ */) ps.i += 2;
             else ps.i++;
           }
-        case 39 /* ' */:
+       } else if (co == 39 /* ' */){
           // parse string
           ps.i++;
           while (true){
-            var c = code(ps);
-            if (c == 39){ ps.i++; break; }
+            var c = code_no_eof(ps);
+            if (c == 39){ ps.i++; 
+              return true; }
             if (c == 92 /* \ */) ps.i += 2;
             else ps.i++;
           }
-        case 40 /* ( */:
-          ps.i++; walk_haxe_expr(ps, true);
-          ignore_spaces(ps);
-          expect_char(")"); ps.i++;
-        case 123 /* { */:
-          ps.i++; walk_haxe_expr(ps, true);
-          ignore_spaces(ps);
-          expect_char("}"); ps.i++;
-        case 32 /* ' ' */:
-          if (repeat) ps.i++;
-          else break;
-        case _:
-          if (co == 125 /* } */ || co == 41 /* ) */) break;
-          // anything else such as foo.bar
-          while (!eof(ps)){
-            var c = code(ps);
-            if ((c >= 97 && c <= 122) /* a-z */ || (c >= 65 && c <= 90) /* A-Z */
-                || c == 95 /*_*/ || c == 46 /*.*/
-                || c == 43 /*+*/ || c == 115 /*-*/
-                || c == 42 /***/ || c == 47 /*/*/
-                || c == 63 /*?*/ || c == 58 /*:*/
-                )
-              ps.i++;
-            else break;
-          }
-      }
-
-      if (start == ps.i) break;
-    }
+      } else return false;
+      parse_failure(ps, "string end expected");
+      throw "X";
+      return false;
   }
+
+
+  static public function walk_parenthesis(ps:ParserState):Bool {
+    var c = code_no_eof(ps);
+    if (c != 40 /* ( */)
+      return false;
+
+    ps.i++;
+    walk_haxe_expr(ps, true, true);
+    // expect_char(")");
+    var c = code_no_eof(ps);
+    if (c != 41)
+      parse_failure(ps, ") expected");
+    ps.i++;
+    return true;
+  }
+
+  static public function walk_struct(ps:ParserState):Bool {
+    if (code_no_eof(ps) != 123 /* { */){
+      return false;
+    } else {
+      ps.i++;
+      while (true){
+        ignore_spaces(ps);
+        var c = code_no_eof(ps);
+        if (c == 125){
+          ps.i++;
+          return true;
+        }
+        // parse key value
+        if (!walk_id(ps))
+          parse_failure(ps, "key expected");
+        ignore_spaces(ps);
+        expect_char(":"); ps.i++;
+        if (!walk_haxe_expr(ps, true, true))
+          parse_failure(ps, "haxe expr expected");
+        ignore_spaces(ps);
+        c = code_no_eof(ps);
+
+        if (c == 125){
+          ps.i++;
+          return true;
+        } else if (c == 44 /* , */){
+          ps.i++;
+          continue;
+        } else {
+          parse_failure(ps, ", or } expected");
+        }
+      }
+    }
+    expect_char("}"); ps.i++;
+    return true;
+  }
+
+  static public function walk_id(ps:ParserState):Bool{
+    var start = ps.i;
+    var c = code_no_eof(ps);
+    while (true) {
+      var c = code_no_eof(ps);
+      if (
+        (c >= 97 && c <= 122) /* a-z */ 
+        || (c >= 65 && c <= 90) /* A-Z */
+        || (c >= 48 && c <= 57) /* 0-9 */
+        || c == 95 /*_*/
+      ){
+        ps.i++;
+      } else {
+        break;
+      }
+    }
+    return start != ps.i;
+  }
+
   static public function parse_haxe_expr(ps:ParserState):E {
     var i = ps.i;
-    walk_haxe_expr(ps);
+    walk_haxe_expr(ps, false, true);
     var s = ps.s.substr(i, ps.i - i);
 #if macro
+    // trace('parsing ${s}');
+    if (s == "") throw "s empty";
     return Context.parse(s, makePos(ps));
 #else
     return s;
 #end
   }
 
-  static public inline function rest_of_line(ps:ParserState) {
+  static public function walk_haxe_expr(ps:ParserState, allow_spaces:Bool = false, allow_comma):Bool {
+    ignore_spaces(ps);
+    var start = ps.i;
+
+    while (true){
+      var s = ps.i;
+      if ((  walk_str(ps)
+          || walk_parenthesis(ps)
+          || walk_struct(ps)
+          || walk_id(ps)
+         )){
+
+        // have found something, continue?
+        if (eof(ps)) return true;
+        var c = code_no_eof(ps);
+        if (
+            allow_spaces &&
+            ( c == 10 /* \n */
+            || c == 13 /* \r */
+            || c == 9 /* \t */
+            || c == 32 /* space */
+            )
+          )
+          ignore_spaces(ps);
+
+        c = code_no_eof(ps);
+        // skip operators, if present
+        if (
+               c == 46 /*.*/
+            || (c == 44 /*,*/ && allow_comma)
+            || c == 43 /*+*/ || c == 115 /*-*/
+            || c == 42 /***/ || c == 47 /*/*/
+            || c == 63 /*?*/ || c == 58 /*:*/
+        ){
+          ps.i++;
+          if (eof(ps)) return true;
+          var c = code(ps);
+          if (
+              allow_spaces &&
+              ( c == 10 /* \n */
+              || c == 13 /* \r */
+              || c == 9 /* \t */
+              || c == 32 /* space */
+              )
+          )
+          ignore_spaces(ps);
+          if (eof(ps)) return true;
+
+          // expect additional code
+          continue;
+        } else {
+          break;
+        }
+      } else {
+        return false;
+      }
+    }
+    return (start != ps.i);
+  }
+
+  static public inline function rest_of_line(ps:ParserState, reset_pos: Bool) {
       var start = ps.i;
       while (!eof(ps) && !is_char("\n")) ps.i++;
       expect_char("\n"); ps.i++;
-      return ps.s.substring(start, ps.i -1);
+      var r = ps.s.substring(start, ps.i);
+      if (reset_pos) ps.i = start;
+      return r;
   }
 
   // for, while etc
@@ -428,7 +542,7 @@ class TemplateParser {
       // parse switch:
 
       // first switch line:
-      var code = "switch "+rest_of_line(ps)+"{\n";
+      var code = "switch "+rest_of_line(ps, false)+"{\n";
 
       var default_content: TemplateContent = null;
       var cases = [];
@@ -451,7 +565,7 @@ class TemplateParser {
             default_content = content;
           } else if (is_string("case ")){
             done = false;
-            code += "case "+ rest_of_line(ps)+"\n";
+            code += "case "+ rest_of_line(ps, false)+"\n";
             parse_template_items(ii+2, ps, content);
             cases.push(content);
           } else ps.i = i;
@@ -583,16 +697,17 @@ class TemplateParser {
           ps.i++;
           var dummy = [];
           parse_template_items(ii+2, ps, dummy);
-      } else
-      switch (code(ps)) {
-        // tags
-        case 37 /*%*/: r.push(parse_tag(ii, ps));
-        case 46 /*.*/: r.push(parse_tag(ii, ps));
-        case 35 /*#*/: r.push(parse_tag(ii, ps));
+      } else {
+        switch (code(ps)) {
+          // tags
+          case 37 /*%*/: r.push(parse_tag(ii, ps));
+          case 46 /*.*/: r.push(parse_tag(ii, ps));
+          case 35 /*#*/: r.push(parse_tag(ii, ps));
 
-        // code
-        case 58 /*:*/: r.push(parse_code(ii, ps));
-        case _: parse_text(ii, ps, r);
+          // code
+          case 58 /*:*/: r.push(parse_code(ii, ps));
+          case _: parse_text(ii, ps, r);
+        }
       }
     }
   }
@@ -787,6 +902,8 @@ class HTMLTemplate {
   // for this reason there is no need to think about changing the implementation
   macro static public function str(template:Expr): Expr {
     var e = TemplateParser.template_to_str_expr(Context.getPosInfos(template.pos), ReflectionExtensions.value_at_path(template.expr, ["EConst",0,"CString",0]));
+
+    // trace(tink.macro.tools.Printer.print(e));
     return e;
   }
 }
