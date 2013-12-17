@@ -243,24 +243,29 @@ class TemplateParser {
         while (!eof(ps) && !is_char(")")){
           // parse attributes
           ignore_spaces(ps);
-          if (is_char("$")){
-            // injections
-            ps.i++;
+
+          var attr_start = ps.i;
+          // hard coded name value pair
+          var name = parse_name_like(ps);
+          if (!is_char("=")){
+            // no name=value, assume {attrs} expr
+            ps.i = attr_start;
             attributes.push(attr_expr(parse_haxe_expr(ps)));
           } else {
-            // hard coded name value pair
-            var name = parse_name_like(ps);
-            expect_char("="); ps.i++;
-            var c = code(ps);
-            if (c == 34 /*"*/ || c == 39 /* ' */){
-              ps.i++;
-              var start = ps.i;
-              while (!eof(ps) && !is_char("\"") && !is_char("'")) ps.i++;
-              ps.i++;
-              var value = ps.s.substr(start, ps.i - start -1);
-              merge_attr(name, value);
-            } else {
-              attributes.push(attr_name_expr_as_value(name, parse_haxe_expr(ps)));
+            ps.i++;
+            // var c = code(ps);
+            // TODO: only use hardcoded values if '' string doesn't contain '#{..}' interpolation
+            // if (c == 34 /*"*/ || c == 39 /* ' */){
+            //   ps.i++;
+            //   var start = ps.i;
+            //   while (!eof(ps) && !is_char("\"") && !is_char("'")) ps.i++;
+            //   ps.i++;
+            //   var value = ps.s.substr(start, ps.i - start -1);
+            //   merge_attr(name, value);
+            // } else 
+            {
+              var value_expr = parse_haxe_expr(ps);
+              attributes.push(attr_name_expr_as_value(name, value_expr));
             }
           }
 
@@ -467,6 +472,9 @@ class TemplateParser {
 
           // expect additional code
           continue;
+        } else if (c == 40 /* ( eg function application */) {
+            // expect additional code
+            continue;
         } else {
           break;
         }

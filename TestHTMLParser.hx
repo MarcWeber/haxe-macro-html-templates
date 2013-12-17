@@ -56,6 +56,7 @@ class TestHTMLParser {
     test("walk_parenthesis", mw.TemplateParser.walk_parenthesis, "('abc') ");
     test("walk_parenthesis", mw.TemplateParser.walk_parenthesis, "(abc.foo) ");
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "\"\"+2+3+4 ");
+    test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "abc(foo) ");
   }
 
   static function main() {
@@ -79,11 +80,11 @@ class TestHTMLParser {
      test(7, "%div#abc", "<div id=\"abc\"></div>");
      test(8, "#abc", "<div id=\"abc\"></div>");
  
-     test(9, "#abc(attr=(\"\"+2+3+4))", "<div id=\"abc\" attr=\"9\"></div>");
+     test(9, "#abc(attr=(\"\"+2+3+4))", "<div id=\"abc\" attr=\"234\"></div>");
      test(9, "#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
      test(10, "#abc(attr='xyz')", "<div id=\"abc\" attr=\"xyz\"></div>");
      test(11, "#abc(attr=value )", "<div id=\"abc\" attr=\"X\"></div>");
-     // test(12, "#abc(${attr: \"X\"})", "<div id=\"abc\" attr=\"X\"></div>");
+     test(12, "#abc({attr: \"X\"})", "<div id=\"abc\" attr=\"X\"></div>");
      test(13, "#abc(attr=value)zdf", "<div id=\"abc\" attr=\"X\">zdf</div>");
      test(14, "#abc(attr=value)='<zdf>'", "<div id=\"abc\" attr=\"X\">&lt;zdf&gt;</div>");
      test(15, "#abc(attr=value)!='<zdf>'", "<div id=\"abc\" attr=\"X\"><zdf></div>");
