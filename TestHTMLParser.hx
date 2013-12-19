@@ -215,6 +215,14 @@ class TestHTMLParser {
             %li.list
               %a(href=\"link\")
       ", "<div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> <div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> <div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> ");
+
+
+      // what about this space?
+      test(30, "
+      %div
+
+      %div
+      ", "<div></div> <div></div>");
  
       /* expected runtime failure, location should point to d.x.y */
       trace("EXPECTED FAILURE, trace should point to d.x.y");

@@ -455,7 +455,12 @@ class TemplateParser {
             || c == 43 /*+*/ || c == 115 /*-*/
             || c == 42 /***/ || c == 47 /*/*/
             || c == 63 /*?*/ || c == 58 /*:*/
+            || c == 61
         ){
+          if (c == 61){
+            ps.i++;
+            expect_char("=");
+          }
           ps.i++;
           if (eof(ps)) return true;
           var c = code(ps);
@@ -699,7 +704,26 @@ class TemplateParser {
     while (!eof(ps)){
       // drop spaces:
       var i = ps.i;
-      if (!spaces(ii, ps)){ ps.i = i; break; }
+      if (!spaces(ii, ps)){
+        // empty line?
+        ps.i = i;
+        var c = 0;
+        while (!eof(ps)){
+          c = code(ps);
+          if (c == 32)
+            ps.i++;
+          else break;
+        }
+        if (c == 10){
+          // ignore this empty line
+          ps.i++;
+          continue;
+        } else {
+          // level up, abort
+          ps.i = i;
+          break;
+        }
+      }
       if (is_string("-#")){
           while (!eof(ps) && !is_char("\n")) ps.i++;
           ps.i++;
@@ -812,6 +836,15 @@ class TemplateParser {
     ps.i = first_line_pos;
     var r = [];
     parse_template_items(initial_indent, ps, r);
+    var rest = ps.s.substr(ps.i);
+    while (!eof(ps)){
+      var c = code(ps);
+      if (c != 32 && c != 13 && c != 10){
+        parse_failure(ps, "extra code: \n"+rest);
+        break;
+      }
+      ps.i++;
+    }
     return r;
   }
 
@@ -837,8 +870,14 @@ class TemplateParser {
                         c;
                     }
                   },
+#if neko
+        quoteS: function(s){ return s == null ? "" : StringTools.htmlEscape(s); },
+        quote: function(e){ return macro $e == null ? "" : StringTools.htmlEscape($e); },
+#else
         quoteS: function(s){ return StringTools.htmlEscape(s); },
         quote: function(e){ return macro StringTools.htmlEscape($e); },
+#end
+
         attrs: function(e){ return macro mw.HTMLTemplate.attrsToHtml($e); },
         if_: function(cond, if_, else_){
                   var el = else_ == null ? (macro "") : else_;
