@@ -57,6 +57,7 @@ class TestHTMLParser {
     test("walk_parenthesis", mw.TemplateParser.walk_parenthesis, "(abc.foo) ");
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "\"\"+2+3+4 ");
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "abc(foo) ");
+    test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "foo.Bar(2) ");
   }
 
   static function main() {
