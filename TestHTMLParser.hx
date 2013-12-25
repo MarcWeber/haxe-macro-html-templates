@@ -58,6 +58,8 @@ class TestHTMLParser {
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "\"\"+2+3+4 ");
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "abc(foo) ");
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "foo.Bar(2) ");
+    test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "foo.Bar(2, 3) ");
+    test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "foo.bar.x(abc, foo) ");
   }
 
   static function main() {

@@ -393,8 +393,8 @@ class TemplateParser {
   static public function walk_id(ps:ParserState):Bool{
     var start = ps.i;
     var c = code_no_eof(ps);
-    while (true) {
-      var c = code_no_eof(ps);
+    while (!eof(ps)) {
+      var c = code(ps);
       if (
         (c >= 97 && c <= 122) /* a-z */ 
         || (c >= 65 && c <= 90) /* A-Z */
