@@ -163,7 +163,7 @@ class TemplateParser {
     var name = "";
     while (!eof(ps)) {
       var c = code(ps);
-      if ((c >= 97 && c <= 122) /* a-z */ || (c >= 48 && c <= 57) /* 0-9 */ || c == 95){
+      if ((c >= 97 && c <= 122) /* a-z */ || (c >= 48 && c <= 57) /* 0-9 */ || c == 95 || c == 45 /* - */){
         name += ps.s.charAt(ps.i);
         ps.i++;
       } else break;
@@ -456,7 +456,13 @@ class TemplateParser {
             || c == 42 /***/ || c == 47 /*/*/
             || c == 63 /*?*/ || c == 58 /*:*/
             || c == 61 /* = */ || c == 46 /* . */
+            || c == 33 /* ! and != */
         ){
+          if (c == 33){
+            ps.i++;
+            if (!is_char('='))
+              ps.i--;
+          }
           if (c == 61){
             ps.i++;
             expect_char("=");

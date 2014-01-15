@@ -1,6 +1,6 @@
 -neko TestHTMLParser.n
 -main TestHTMLParser
 -D absolute-path
--cp ../haxe-mw-extensions
+-cp ../haxe-mw-extensions/src
 -cp ../tinkerbell/src
 -cp src

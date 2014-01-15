@@ -3,6 +3,12 @@ import haxe.macro.Expr;
 import haxe.macro.Context;
 import mw.HTMLTemplate;
 
+class KnownImages {
+  static public function imageHTML(ctx:Dynamic, bx:String, x:Dynamic){
+    return "<tag>";
+  }
+}
+
 class TestHTMLParser {
 
   macro static function test(nr:ExprOf<Int>, template:ExprOf<String>, expected:ExprOf<String>):Expr {
@@ -60,6 +66,10 @@ class TestHTMLParser {
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "foo.Bar(2) ");
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "foo.Bar(2, 3) ");
     test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "foo.bar.x(abc, foo) ");
+    test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "f.html() ");
+    test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, false) , "KnownImages.imageHTML(ctx,b,\"h-25\") ");
+    test("walk_haxe_expr", function(s) return  mw.TemplateParser.walk_haxe_expr(s, false, true) , "(u != null) ");
+
   }
 
   static function main() {
@@ -154,30 +164,37 @@ class TestHTMLParser {
        // mind the > omitting the space after the tag
       test(23, "
         :for (i in [1,2,3])
-          %div>=(''+i)
+          %div=(''+i)
+      ", "<div>1</div><div>2</div><div>3</div>");
+ 
+
+       // without space
+      test(24, "
+        :for(i in [1,2,3])
+          %div=(''+i)
       ", "<div>1</div><div>2</div><div>3</div>");
  
  
-      test(24, "
+      test(25, "
         :javascript
           alert('abc');
       ", "<script type='text/javascript'>//<![CDATA[alert('abc');//]]></script>");
  
-      test(25, "
+      test(26, "
         :css
           div {
             height;
           }
       ", "<style type='text/css'>//<![CDATA[div {   height; }//]]></style>");
  
-      test(25, "
+      test(27, "
         %div
           -#
             multi line
             comment
       ", "<div></div>");
  
-      test(26, "
+      test(28, "
         %div
           -# single line comment
         %div
@@ -192,7 +209,7 @@ class TestHTMLParser {
       // ", "failure expected");
  
       var value = "first";
-      test(27, "
+      test(29, "
         :switch (value)
         :case \"first\":
           %div first_text
@@ -201,7 +218,7 @@ class TestHTMLParser {
         :default:
       ", "<div>first_text</div> ");
  
-      test(28, "
+      test(30, "
         :switch (\"none\")
         :case \"first\":
           %div first_text
@@ -210,7 +227,7 @@ class TestHTMLParser {
       ", "<div>default_text</div> ");
  
  
-      test(29, "
+      test(31, "
       :for (i in [1,2,3])
         %div
           some
@@ -219,18 +236,55 @@ class TestHTMLParser {
               %a(href=\"link\")
       ", "<div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> <div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> <div>some<ul><li class=\"list\"><a href=\"link\"></a> </li> </ul> </div> ");
 
+      test(32, "
+      :for (i in [1,2,3])
+        !=i
+      ", "123");
+
+
+      var args = ["1","2","3"];
+      test(32, "
+      #id_value
+        :for (i in args)
+          !=i
+      ", '<div id="id_value">123</div>');
 
       // what about this space?
-      test(30, "
+      test(33, "
       %div
 
       %div
       ", "<div></div> <div></div>");
+
+      // test(34, "
+      //     :for(u in users)
+      //       :if (u.queenFlavour() != null)
+      //         =u.queenFlavour()
+      // ", "");
+
+      var brand_images = ["1","2"];
+      var ctx = null;
+      test(34, "
+      :for (bx in brand_images)
+        !=KnownImages.imageHTML(ctx, bx, 'h-25')
+      ", "");
+
+
+      var r = mw.HTMLTemplate.str("
+      :for (bx in brand_images)
+        !=KnownImages.imageHTML(ctx, bx, 'h-25')
+      ");
+
+
+    return mw.HTMLTemplate.str("
+      :for (bx in brand_images)
+        !=KnownImages.imageHTML(ctx, bx, 'h-25')
+    ");
  
       /* expected runtime failure, location should point to d.x.y */
       trace("EXPECTED FAILURE, trace should point to d.x.y");
       var d = null;
-      test(26, "
+      test(34, "
         %div
           =d.x.y
         %div
